@@ -626,7 +626,7 @@ Return ONLY a JSON array:
     <div style={styles.app}>
       <style>{`
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #141118; }
+        body { background: #141118; overflow-x: hidden; }
       `}</style>
 
       {/* Header */}
@@ -704,12 +704,12 @@ Return ONLY a JSON array:
                   </div>
 
                   {/* Category levels */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+                  <div className="stage-cats" style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
                     {stageInfo.catLevels.map(cat => {
                       const hasHobbies = data.hobbies.some(h => h.category === cat.id);
                       return (
                         <div key={cat.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <span style={{ fontSize: 12, color: cat.color, width: 65, textAlign: "right", fontWeight: 500 }}>{cat.label}</span>
+                          <span className="cat-label" style={{ fontSize: 12, color: cat.color, width: 65, textAlign: "right", fontWeight: 500 }}>{cat.label}</span>
                           <div style={{ flex: 1 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
                               <div style={{ flex: 1, height: 6, background: "rgba(255,255,255,0.06)", borderRadius: 3, overflow: "hidden" }}>
@@ -729,7 +729,7 @@ Return ONLY a JSON array:
                   </div>
 
                   {/* Mini stats */}
-                  <div style={{ display: "flex", gap: 16, justifyContent: "center", paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                  <div className="mini-stats" style={{ display: "flex", gap: 16, justifyContent: "center", paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                     <div style={{ textAlign: "center" }}>
                       <div style={{ fontSize: 20, fontWeight: 600, color: accent, fontFamily: "'DM Serif Display', serif" }}>{overallStreak}</div>
                       <div style={{ fontSize: 10, color: textDim, textTransform: "uppercase", letterSpacing: 1 }}>streak</div>
@@ -780,7 +780,7 @@ Return ONLY a JSON array:
                   {isRestDay ? "Resting today — streak protected" : "Take a rest day"}
                 </button>
 
-                <div style={styles.checkinGrid}>
+                <div className="checkin-grid" style={styles.checkinGrid}>
                   {data.hobbies.map(h => {
                     const done = h.log[today];
                     const cat = CATEGORIES.find(c => c.id === h.category) || CATEGORIES[0];
@@ -883,7 +883,7 @@ Return ONLY a JSON array:
                   {/* Rest day row */}
                   <div style={styles.heatRow}>
                     <div style={styles.heatLabel}>🌿 Rest Days</div>
-                    <div style={styles.heatDays}>
+                    <div className="heat-days" style={styles.heatDays}>
                       {last7.map(d => {
                         const isRest = data.restDays && data.restDays[d];
                         return (
@@ -909,7 +909,7 @@ Return ONLY a JSON array:
                     return (
                     <div key={h.id} style={styles.heatRow}>
                       <div style={styles.heatLabel}>{h.icon} {h.name}</div>
-                      <div style={styles.heatDays}>
+                      <div className="heat-days" style={styles.heatDays}>
                         {last7.map(d => {
                           const isRest = data.restDays && data.restDays[d];
                           const didIt = h.log[d];
@@ -980,7 +980,7 @@ Return ONLY a JSON array:
               />
 
               <label style={{ ...styles.label, marginTop: 20 }}>Type</label>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div className="type-picker" style={{ display: "flex", gap: 8 }}>
                 {[
                   { id: "routine", label: "Routine", desc: "Log minutes, set weekly goals" },
                   { id: "event", label: "Event", desc: "Just check in when you do it" },
@@ -1397,7 +1397,7 @@ Return ONLY a JSON array:
       </main>
 
       {/* Toast */}
-      {toast && <div style={styles.toast}>{toast}</div>}
+      {toast && <div className="toast-msg" style={styles.toast}>{toast}</div>}
     </div>
   );
 }
@@ -1428,6 +1428,7 @@ const styles = {
     maxWidth: 720,
     margin: "0 auto",
     padding: "0 20px 80px",
+    overflowX: "hidden",
   },
   loadWrap: { display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", background: bg },
   loadPulse: { fontSize: 48, animation: "pulse 1.5s ease infinite" },
@@ -1572,6 +1573,6 @@ const styles = {
     background: accent, color: bg, padding: "12px 24px", borderRadius: 12,
     fontSize: 14, fontWeight: 600, fontFamily: "'Source Sans 3', sans-serif",
     animation: "toastIn 0.3s ease", boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-    zIndex: 100, whiteSpace: "nowrap",
+    zIndex: 100, whiteSpace: "normal", textAlign: "center", maxWidth: "90vw",
   },
 };

@@ -8,6 +8,7 @@ body {
   background: #141118;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
 @keyframes fadeUp {
@@ -27,4 +28,18 @@ body {
 
 .hgrid::-webkit-scrollbar {
   display: none;
+}
+
+@media (max-width: 600px) {
+  .checkin-grid { grid-template-columns: repeat(3, 1fr) !important; }
+  .heat-days { gap: 3px !important; }
+  .heat-days button { height: 36px !important; border-radius: 6px !important; }
+  .heat-days button:nth-child(-n+3) { display: none !important; }
+  .heat-days button span { font-size: 8px !important; }
+  .stage-cats { gap: 6px !important; }
+  .cat-label { width: 50px !important; font-size: 11px !important; }
+  .mini-stats { gap: 10px !important; }
+  .mini-stats > div:not([style*="width: 1"]) > div:first-child { font-size: 16px !important; }
+  .toast-msg { font-size: 12px !important; padding: 10px 16px !important; max-width: 90vw !important; }
+  .type-picker { flex-direction: column !important; }
 }
