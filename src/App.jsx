@@ -509,33 +509,28 @@ export default function Joie() {
     const topicList = selectedTopics.map(t => t.label).join(", ");
     const recentSaved = (data.savedItems || []).slice(-10).map(s => `"${s.title}" (${s.topic})`).join(", ");
 
-    try {
-      const response = await fetch("/api/discover", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system: `You are a thoughtful content curator for a personal growth app called Joie. Your goal is to help people find joy and meaning outside of work. You search the web for content that is hopeful, fascinating, and perspective-shifting. You actively avoid doom-scrolling content, fear-based headlines, and outrage bait. When covering current events, focus on progress, solutions, and human resilience. Your final response must be ONLY a JSON array — no explanation, no markdown fences, no preamble.`,
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-          messages: [{
-            role: "user",
-            content: `Search the web and curate ${DAILY_CARD_LIMIT} pieces of content for me. My interests are: ${topicList}.
+    const prompt = `You are a thoughtful content curator for a personal growth app. Search the web and curate ${DAILY_CARD_LIMIT} pieces of content. My interests are: ${topicList}.
 ${recentSaved ? `\nTASTE SIGNAL: Here are articles I recently saved and enjoyed. Use these as hints for the kind of content I gravitate toward, but don't repeat them:\n${recentSaved}\n` : ""}
 CRITICAL DISTRIBUTION RULE: Spread content EVENLY across my ${selectedTopics.length} topics. Each topic must have at least ${Math.max(1, Math.floor(DAILY_CARD_LIMIT / selectedTopics.length))} pieces. Do NOT over-index on any single topic.
 
 Content guidelines:
 - Hopeful and constructive tone — progress, breakthroughs, solutions, human stories
 - Mix of articles, video essays, and long-reads
-- Include 1-2 online community recommendations (subreddits, Discord servers, forums, Substacks) that match my interests — places I could join and participate in
-- Include lesser-known sources alongside major publications (indie blogs, niche YouTube, substack, etc.)
-- Relevant to 2025-2026 where possible — what's happening NOW in these areas
+- Include 1-2 online community recommendations (subreddits, Discord servers, forums, Substacks) that match my interests
+- Include lesser-known sources alongside major publications
+- Relevant to 2025-2026 where possible
 - No clickbait, no outrage, no doom
 - For current events: focus on what's going RIGHT, not what's going wrong
 - Surprise me — include at least 2-3 things I wouldn't have found on my own
 
-Return ONLY a JSON array:
-[{"title":"string","source":"string","url":"https://...","imageUrl":"direct URL to article thumbnail or video thumbnail if available, or empty string if none","summary":"2-3 sentences on why this is worth your time","topic":"one of: ${topicList}","type":"article, video, or community","whyPicked":"one sentence connecting this to personal growth or joy"}]`
-          }],
-        }),
+Return ONLY a JSON array, no other text, no markdown fences:
+[{"title":"string","source":"string","url":"https://...","imageUrl":"direct URL to thumbnail or empty string","summary":"2-3 sentences","topic":"one of: ${topicList}","type":"article, video, or community","whyPicked":"one sentence connecting this to personal growth or joy"}]`;
+
+    try {
+      const response = await fetch("/api/discover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
       });
 
       if (!response.ok) {
@@ -546,37 +541,20 @@ Return ONLY a JSON array:
       const result = await response.json();
 
       if (result.error) {
-        throw new Error(result.error.message || "API error");
+        throw new Error(result.error);
       }
 
-      // Handle stop_reason: "end_turn" means we have the final response
-      // Handle stop_reason: "tool_use" means web search is still processing
-      // The API should handle web search internally for web_search_20250305
+      const text = result.text || "";
+      const cleaned = text.replace(/```json|```/g, "").trim();
+      const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
 
-      // Collect ALL text blocks from the response
-      const textBlocks = (result.content || [])
-        .filter(b => b.type === "text")
-        .map(b => b.text)
-        .filter(t => t.trim().length > 0);
-
-      if (textBlocks.length === 0) {
-        throw new Error("No text content in response. Stop reason: " + result.stop_reason);
+      if (!jsonMatch) {
+        throw new Error("No JSON array found in response");
       }
 
-      // Try each text block, starting from the last (most likely to be final answer)
-      let cards = null;
-      for (let i = textBlocks.length - 1; i >= 0; i--) {
-        const cleaned = textBlocks[i].replace(/```json|```/g, "").trim();
-        const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-        if (jsonMatch) {
-          try {
-            cards = JSON.parse(jsonMatch[0]);
-            break;
-          } catch (e) { continue; }
-        }
-      }
+      const cards = JSON.parse(jsonMatch[0]);
 
-      if (!cards || !Array.isArray(cards) || cards.length === 0) {
+      if (!Array.isArray(cards) || cards.length === 0) {
         throw new Error("Could not parse content cards from response");
       }
 
