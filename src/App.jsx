@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { supabase } from "./supabase";
 
 const MAX_HOBBIES = 12;
 
@@ -309,22 +310,100 @@ export default function Joie() {
   const [feedLoading, setFeedLoading] = useState(false);
   const [feedDate, setFeedDate] = useState(null);
   const [feedError, setFeedError] = useState(null);
-  const [discoverView, setDiscoverView] = useState("feed"); // "feed", "interests", "saved"
+  const [discoverView, setDiscoverView] = useState("feed");
+  // Auth state
+  const [user, setUser] = useState(null);
+  const [authMode, setAuthMode] = useState("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState(null);
+  const [authLoading, setAuthLoading] = useState(false);
 
+  // Check auth on mount
   useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user || null);
+      if (session?.user) loadFromSupabase(session.user.id);
+      else setLoaded(true);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+      if (session?.user) loadFromSupabase(session.user.id);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const loadFromSupabase = async (userId) => {
     try {
-      const saved = localStorage.getItem("joie-data");
-      if (saved) {
-        setData({ ...defaultData, ...JSON.parse(saved) });
+      const { data: row, error } = await supabase
+        .from("user_data")
+        .select("data")
+        .eq("user_id", userId)
+        .single();
+
+      if (row?.data) {
+        const merged = { ...defaultData, ...row.data };
+        setData(merged);
+        try { localStorage.setItem("joie-data", JSON.stringify(merged)); } catch {}
+      } else {
+        // No cloud data — check localStorage for existing data to migrate
+        try {
+          const local = localStorage.getItem("joie-data");
+          if (local) {
+            const parsed = { ...defaultData, ...JSON.parse(local) };
+            setData(parsed);
+            // Save local data to cloud
+            await supabase.from("user_data").upsert({ user_id: userId, data: parsed, updated_at: new Date().toISOString() });
+          }
+        } catch {}
       }
     } catch {}
     setLoaded(true);
-  }, []);
+  };
 
-  const persist = useCallback((newData) => {
+  const persist = useCallback(async (newData) => {
     setData(newData);
     try { localStorage.setItem("joie-data", JSON.stringify(newData)); } catch {}
-  }, []);
+    if (user) {
+      try {
+        await supabase.from("user_data").upsert({
+          user_id: user.id,
+          data: newData,
+          updated_at: new Date().toISOString(),
+        });
+      } catch {}
+    }
+  }, [user]);
+
+  const handleAuth = async (mode) => {
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      let result;
+      if (mode === "signup") {
+        result = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+      } else {
+        result = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+      }
+      if (result.error) setAuthError(result.error.message);
+      else if (mode === "signup" && result.data?.user && !result.data.session) {
+        setAuthError("Check your email to confirm your account, then log in.");
+        setAuthMode("login");
+      }
+    } catch (e) {
+      setAuthError(e.message);
+    }
+    setAuthLoading(false);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setData(defaultData);
+    setView("dashboard");
+  };
 
   const showToast = (msg) => {
     setToast(msg);
@@ -600,6 +679,61 @@ Return ONLY a JSON array, no other text, no markdown fences:
 
   if (!loaded) return <div style={styles.loadWrap}><div style={styles.loadPulse}>🌱</div></div>;
 
+  // Auth screen
+  if (!user) return (
+    <div style={styles.app}>
+      <style>{`
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #141118; overflow-x: hidden; }
+      `}</style>
+      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", padding: 20 }}>
+        <h1 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 42, color: accent, marginBottom: 8 }}>Joie</h1>
+        <p style={{ color: textDim, fontSize: 15, marginBottom: 40 }}>Find joy in life outside of work</p>
+
+        <div style={{ width: "100%", maxWidth: 360 }}>
+          <div style={{ display: "flex", marginBottom: 20, borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
+            <button
+              onClick={() => { setAuthMode("login"); setAuthError(null); }}
+              style={{ flex: 1, padding: "10px", background: authMode === "login" ? accentDim : "transparent", color: authMode === "login" ? accent : textDim, border: "none", cursor: "pointer", fontFamily: "'Source Sans 3', sans-serif", fontSize: 14, fontWeight: 500 }}
+            >Log in</button>
+            <button
+              onClick={() => { setAuthMode("signup"); setAuthError(null); }}
+              style={{ flex: 1, padding: "10px", background: authMode === "signup" ? accentDim : "transparent", color: authMode === "signup" ? accent : textDim, border: "none", cursor: "pointer", fontFamily: "'Source Sans 3', sans-serif", fontSize: 14, fontWeight: 500 }}
+            >Sign up</button>
+          </div>
+
+          <input
+            type="email"
+            placeholder="Email"
+            value={authEmail}
+            onChange={e => setAuthEmail(e.target.value)}
+            style={{ ...styles.input, width: "100%", marginBottom: 12 }}
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={authPassword}
+            onChange={e => setAuthPassword(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleAuth(authMode)}
+            style={{ ...styles.input, width: "100%", marginBottom: 20 }}
+          />
+
+          {authError && (
+            <p style={{ color: accent, fontSize: 13, marginBottom: 16, textAlign: "center" }}>{authError}</p>
+          )}
+
+          <button
+            onClick={() => handleAuth(authMode)}
+            disabled={authLoading}
+            style={{ ...styles.primaryBtn, width: "100%", opacity: authLoading ? 0.6 : 1 }}
+          >
+            {authLoading ? "..." : authMode === "login" ? "Log in" : "Create account"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div style={styles.app}>
       <style>{`
@@ -613,12 +747,15 @@ Return ONLY a JSON array, no other text, no markdown fences:
           <h1 style={styles.logo}>Joie</h1>
           <p style={styles.subtitle}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
         </div>
-        {todayTotal > 0 && (
-          <div style={styles.headerStat}>
-            <span style={styles.headerStatNum}>{todayCheckedCount}/{todayTotal}</span>
-            <span style={styles.headerStatLabel}>today</span>
-          </div>
-        )}
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 16 }}>
+          {todayTotal > 0 && (
+            <div style={styles.headerStat}>
+              <span style={styles.headerStatNum}>{todayCheckedCount}/{todayTotal}</span>
+              <span style={styles.headerStatLabel}>today</span>
+            </div>
+          )}
+          <button onClick={handleLogout} style={{ background: "none", border: "none", color: textDim, fontSize: 12, cursor: "pointer", fontFamily: "'Source Sans 3', sans-serif", padding: "4px 0" }}>Logout</button>
+        </div>
       </header>
 
       {/* Nav */}
