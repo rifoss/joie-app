@@ -337,32 +337,41 @@ export default function Joie() {
 
   const loadFromSupabase = async (userId) => {
     try {
-      const { data: row, error } = await supabase
+      // Try loading from Supabase first
+      const { data: rows, error } = await supabase
         .from("user_data")
         .select("data")
-        .eq("user_id", userId)
-        .single();
+        .eq("user_id", userId);
 
-      if (row?.data) {
-        const merged = { ...defaultData, ...row.data };
+      if (error) {
+        console.error("Supabase load error:", error);
+      }
+
+      if (rows && rows.length > 0 && rows[0].data) {
+        const merged = { ...defaultData, ...rows[0].data };
         setData(merged);
         try { localStorage.setItem("joie-data", JSON.stringify(merged)); } catch {}
-      } else {
-        // No cloud data — check localStorage for existing data to migrate
-        try {
-          const local = localStorage.getItem("joie-data");
-          if (local) {
-            const parsed = { ...defaultData, ...JSON.parse(local) };
-            setData(parsed);
-            // Save local data to cloud
-            await supabase.from("user_data").upsert(
-              { user_id: userId, data: parsed, updated_at: new Date().toISOString() },
-              { onConflict: 'user_id' }
-            );
-          }
-        } catch {}
+        setLoaded(true);
+        return;
       }
-    } catch {}
+
+      // No cloud data — check localStorage for existing data to migrate
+      const local = localStorage.getItem("joie-data");
+      if (local) {
+        const parsed = { ...defaultData, ...JSON.parse(local) };
+        setData(parsed);
+        await supabase.from("user_data")
+          .update({ data: parsed, updated_at: new Date().toISOString() })
+          .eq("user_id", userId);
+      }
+    } catch (e) {
+      console.error("Load error:", e);
+      // Final fallback — try localStorage
+      try {
+        const local = localStorage.getItem("joie-data");
+        if (local) setData({ ...defaultData, ...JSON.parse(local) });
+      } catch {}
+    }
     setLoaded(true);
   };
 
@@ -371,11 +380,21 @@ export default function Joie() {
     try { localStorage.setItem("joie-data", JSON.stringify(newData)); } catch {}
     if (user) {
       try {
-        const { error } = await supabase.from("user_data").upsert(
-          { user_id: user.id, data: newData, updated_at: new Date().toISOString() },
-          { onConflict: 'user_id' }
-        );
-        if (error) console.error("Supabase save error:", error);
+        // Try update first (row should exist)
+        const { error: updateError } = await supabase
+          .from("user_data")
+          .update({ data: newData, updated_at: new Date().toISOString() })
+          .eq("user_id", user.id);
+
+        if (updateError) {
+          console.error("Update failed, trying insert:", updateError);
+          // Fallback to insert if row doesn't exist yet
+          const { error: insertError } = await supabase
+            .from("user_data")
+            .insert({ user_id: user.id, data: newData, updated_at: new Date().toISOString() });
+
+          if (insertError) console.error("Insert also failed:", insertError);
+        }
       } catch (e) { console.error("Supabase save exception:", e); }
     }
   }, [user]);
