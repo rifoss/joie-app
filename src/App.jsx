@@ -355,7 +355,10 @@ export default function Joie() {
             const parsed = { ...defaultData, ...JSON.parse(local) };
             setData(parsed);
             // Save local data to cloud
-            await supabase.from("user_data").upsert({ user_id: userId, data: parsed, updated_at: new Date().toISOString() });
+            await supabase.from("user_data").upsert(
+              { user_id: userId, data: parsed, updated_at: new Date().toISOString() },
+              { onConflict: 'user_id' }
+            );
           }
         } catch {}
       }
@@ -368,12 +371,12 @@ export default function Joie() {
     try { localStorage.setItem("joie-data", JSON.stringify(newData)); } catch {}
     if (user) {
       try {
-        await supabase.from("user_data").upsert({
-          user_id: user.id,
-          data: newData,
-          updated_at: new Date().toISOString(),
-        });
-      } catch {}
+        const { error } = await supabase.from("user_data").upsert(
+          { user_id: user.id, data: newData, updated_at: new Date().toISOString() },
+          { onConflict: 'user_id' }
+        );
+        if (error) console.error("Supabase save error:", error);
+      } catch (e) { console.error("Supabase save exception:", e); }
     }
   }, [user]);
 
