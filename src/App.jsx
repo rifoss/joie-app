@@ -270,7 +270,7 @@ const INTERESTS = [
   { id: "money", label: "Money & Independence", icon: "💰", desc: "Personal finance, investing, freedom" },
 ];
 
-const DAILY_CARD_LIMIT = 15;
+const DAILY_CARD_LIMIT = 8;
 
 const TOPIC_GRADIENTS = {
   "Science & Nature": "linear-gradient(135deg, #1a3a2a, #0d4a3a)",
@@ -608,65 +608,64 @@ export default function Joie() {
     setFeedError(null);
     const selectedTopics = INTERESTS.filter(i => interests.includes(i.id));
     const topicList = selectedTopics.map(t => t.label).join(", ");
-    const recentSaved = (data.savedItems || []).slice(-10).map(s => `"${s.title}" (${s.topic})`).join(", ");
+    const recentSaved = (data.savedItems || []).slice(-5).map(s => `"${s.title}"`).join(", ");
 
-    const prompt = `You are a thoughtful content curator for a personal growth app. Search the web and curate ${DAILY_CARD_LIMIT} pieces of content. My interests are: ${topicList}.
-${recentSaved ? `\nTASTE SIGNAL: Here are articles I recently saved and enjoyed. Use these as hints for the kind of content I gravitate toward, but don't repeat them:\n${recentSaved}\n` : ""}
-CRITICAL DISTRIBUTION RULE: Spread content EVENLY across my ${selectedTopics.length} topics. Each topic must have at least ${Math.max(1, Math.floor(DAILY_CARD_LIMIT / selectedTopics.length))} pieces. Do NOT over-index on any single topic.
+    const prompt = `Search the web and find ${DAILY_CARD_LIMIT} interesting, hopeful articles or videos across these topics: ${topicList}.
+${recentSaved ? `I recently enjoyed: ${recentSaved}. Find similar quality content but don't repeat these.\n` : ""}
+Spread evenly across topics. Mix articles, videos, and 1 community recommendation. Hopeful tone only — no doom, no clickbait. Recent content preferred.
 
-Content guidelines:
-- Hopeful and constructive tone — progress, breakthroughs, solutions, human stories
-- Mix of articles, video essays, and long-reads
-- Include 1-2 online community recommendations (subreddits, Discord servers, forums, Substacks) that match my interests
-- Include lesser-known sources alongside major publications
-- Relevant to 2025-2026 where possible
-- No clickbait, no outrage, no doom
-- For current events: focus on what's going RIGHT, not what's going wrong
-- Surprise me — include at least 2-3 things I wouldn't have found on my own
+Return ONLY a JSON array, no other text:
+[{"title":"string","source":"string","url":"https://...","imageUrl":"thumbnail URL or empty string","summary":"2 sentences","topic":"one of: ${topicList}","type":"article, video, or community","whyPicked":"why this matters"}]`;
 
-Return ONLY a JSON array, no other text, no markdown fences:
-[{"title":"string","source":"string","url":"https://...","imageUrl":"direct URL to thumbnail or empty string","summary":"2-3 sentences","topic":"one of: ${topicList}","type":"article, video, or community","whyPicked":"one sentence connecting this to personal growth or joy"}]`;
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await fetch("/api/discover", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt }),
+        });
 
-    try {
-      const response = await fetch("/api/discover", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
-      });
+        if (!response.ok) {
+          if (response.status === 503 && attempt < maxRetries) {
+            console.log(`Attempt ${attempt} got 503, retrying...`);
+            await new Promise(r => setTimeout(r, 2000 * attempt));
+            continue;
+          }
+          const errText = await response.text();
+          throw new Error(`API returned ${response.status}: ${errText.slice(0, 200)}`);
+        }
 
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`API returned ${response.status}: ${errText.slice(0, 200)}`);
+        const result = await response.json();
+
+        if (result.error) throw new Error(result.error);
+
+        const text = result.text || "";
+        const cleaned = text.replace(/```json|```/g, "").trim();
+        const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+
+        if (!jsonMatch) throw new Error("No JSON array found in response");
+
+        const cards = JSON.parse(jsonMatch[0]);
+
+        if (!Array.isArray(cards) || cards.length === 0) throw new Error("Empty result");
+
+        setFeedCards(cards.slice(0, DAILY_CARD_LIMIT));
+        setFeedIndex(0);
+        setFeedDate(today);
+        setFeedError(null);
+        setFeedLoading(false);
+        return;
+      } catch (err) {
+        if (attempt === maxRetries) {
+          console.error("Discover fetch error:", err);
+          setFeedError(err.message);
+          showToast("Couldn't load content — try again later");
+        } else {
+          console.log(`Attempt ${attempt} failed, retrying...`);
+          await new Promise(r => setTimeout(r, 2000 * attempt));
+        }
       }
-
-      const result = await response.json();
-
-      if (result.error) {
-        throw new Error(result.error);
-      }
-
-      const text = result.text || "";
-      const cleaned = text.replace(/```json|```/g, "").trim();
-      const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-
-      if (!jsonMatch) {
-        throw new Error("No JSON array found in response");
-      }
-
-      const cards = JSON.parse(jsonMatch[0]);
-
-      if (!Array.isArray(cards) || cards.length === 0) {
-        throw new Error("Could not parse content cards from response");
-      }
-
-      setFeedCards(cards.slice(0, DAILY_CARD_LIMIT));
-      setFeedIndex(0);
-      setFeedDate(today);
-      setFeedError(null);
-    } catch (err) {
-      console.error("Discover fetch error:", err);
-      setFeedError(err.message);
-      showToast("Couldn't load content — see error below");
     }
     setFeedLoading(false);
   };
