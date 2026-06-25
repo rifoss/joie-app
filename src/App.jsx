@@ -40,15 +40,15 @@ const LEVELS = [
 
 const STAGES = [
   { stage: 1, name: "Drifter", req: null, desc: "Beginning the journey" },
-  { stage: 2, name: "Wanderer", req: { count: 1, level: 2 }, desc: "1 category at Lv.2" },
-  { stage: 3, name: "Seeker", req: { count: 2, level: 2 }, desc: "2 categories at Lv.2" },
-  { stage: 4, name: "Explorer", req: { count: 2, level: 3 }, desc: "2 categories at Lv.3" },
-  { stage: 5, name: "Pathfinder", req: { count: 3, level: 3 }, desc: "3 categories at Lv.3" },
-  { stage: 6, name: "Navigator", req: { count: 3, level: 4 }, desc: "3 categories at Lv.4" },
-  { stage: 7, name: "Voyager", req: { count: 4, level: 4 }, desc: "4 categories at Lv.4" },
-  { stage: 8, name: "Trailblazer", req: { count: 4, level: 5 }, desc: "4 categories at Lv.5" },
-  { stage: 9, name: "Sage", req: { count: 5, level: 5 }, desc: "5 categories at Lv.5" },
-  { stage: 10, name: "Wayfarer", req: { count: 5, level: 6 }, desc: "All 5 categories at Lv.6" },
+  { stage: 2, name: "Wanderer", req: { count: 1, level: 2, streak: 0 }, desc: "1 category at Lv.2" },
+  { stage: 3, name: "Seeker", req: { count: 2, level: 2, streak: 7 }, desc: "2 categories at Lv.2 + 7d best streak" },
+  { stage: 4, name: "Explorer", req: { count: 2, level: 3, streak: 7 }, desc: "2 categories at Lv.3 + 7d best streak" },
+  { stage: 5, name: "Pathfinder", req: { count: 3, level: 3, streak: 14 }, desc: "3 categories at Lv.3 + 14d best streak" },
+  { stage: 6, name: "Navigator", req: { count: 3, level: 4, streak: 14 }, desc: "3 categories at Lv.4 + 14d best streak" },
+  { stage: 7, name: "Voyager", req: { count: 4, level: 4, streak: 21 }, desc: "4 categories at Lv.4 + 21d best streak" },
+  { stage: 8, name: "Trailblazer", req: { count: 4, level: 5, streak: 21 }, desc: "4 categories at Lv.5 + 21d best streak" },
+  { stage: 9, name: "Sage", req: { count: 5, level: 5, streak: 30 }, desc: "5 categories at Lv.5 + 30d best streak" },
+  { stage: 10, name: "Wayfarer", req: { count: 5, level: 6, streak: 30 }, desc: "All 5 categories at Lv.6 + 30d best streak" },
 ];
 
 const WEEKLY_GOAL_BONUS = 25;
@@ -141,7 +141,7 @@ function getCategoryLevels(hobbies) {
   });
 }
 
-function getStageInfo(hobbies) {
+function getStageInfo(hobbies, bestStreak) {
   const catLevels = getCategoryLevels(hobbies);
   let currentStage = STAGES[0];
 
@@ -149,14 +149,15 @@ function getStageInfo(hobbies) {
     const s = STAGES[i];
     if (!s.req) { currentStage = s; continue; }
     const qualifying = catLevels.filter(c => c.level >= s.req.level).length;
-    if (qualifying >= s.req.count) {
+    const streakMet = (bestStreak || 0) >= (s.req.streak || 0);
+    if (qualifying >= s.req.count && streakMet) {
       currentStage = s;
       break;
     }
   }
 
   const nextStage = STAGES.find(s => s.stage === currentStage.stage + 1);
-  return { ...currentStage, next: nextStage, catLevels };
+  return { ...currentStage, next: nextStage, catLevels, bestStreak: bestStreak || 0 };
 }
 
 function toLocalDateStr(date) {
@@ -199,6 +200,29 @@ function calculateOverallStreak(hobbies, restDays) {
     else break;
   }
   return streak;
+}
+
+function longestOverallStreak(hobbies, restDays) {
+  // Collect all dates with any activity or rest
+  const allDates = new Set();
+  hobbies.forEach(h => {
+    Object.keys(h.log).forEach(d => { if (h.log[d]) allDates.add(d); });
+  });
+  if (restDays) {
+    Object.keys(restDays).forEach(d => { if (restDays[d]) allDates.add(d); });
+  }
+  const sorted = [...allDates].sort();
+  if (sorted.length === 0) return 0;
+
+  let longest = 1, current = 1;
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = new Date(sorted[i - 1] + "T12:00:00");
+    const curr = new Date(sorted[i] + "T12:00:00");
+    const diff = (curr - prev) / (1000 * 60 * 60 * 24);
+    if (diff === 1) { current++; longest = Math.max(longest, current); }
+    else current = 1;
+  }
+  return Math.max(longest, current);
 }
 
 function getRestDaysThisWeek(restDays) {
@@ -270,7 +294,7 @@ const INTERESTS = [
   { id: "money", label: "Money & Independence", icon: "💰", desc: "Personal finance, investing, freedom" },
 ];
 
-const DAILY_CARD_LIMIT = 8;
+const DAILY_CARD_LIMIT = 15;
 
 const TOPIC_GRADIENTS = {
   "Science & Nature": "linear-gradient(135deg, #1a3a2a, #0d4a3a)",
@@ -295,7 +319,7 @@ const defaultData = {
 
 export default function Joie() {
   const [data, setData] = useState(defaultData);
-  const [view, setView] = useState("dashboard");
+  const [view, setView] = useState("home");
   const [editingHobby, setEditingHobby] = useState(null);
   const [hobbyForm, setHobbyForm] = useState({ name: "", icon: "🎸", weeklyGoal: "", category: "move", hobbyType: "routine" });
   const [toast, setToast] = useState(null);
@@ -311,7 +335,6 @@ export default function Joie() {
   const [feedDate, setFeedDate] = useState(null);
   const [feedError, setFeedError] = useState(null);
   const [discoverView, setDiscoverView] = useState("feed");
-  // Auth state
   const [user, setUser] = useState(null);
   const [authMode, setAuthMode] = useState("login");
   const [authEmail, setAuthEmail] = useState("");
@@ -319,34 +342,23 @@ export default function Joie() {
   const [authError, setAuthError] = useState(null);
   const [authLoading, setAuthLoading] = useState(false);
 
-  // Check auth on mount
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user || null);
       if (session?.user) loadFromSupabase(session.user.id);
       else setLoaded(true);
     });
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user || null);
       if (session?.user) loadFromSupabase(session.user.id);
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
   const loadFromSupabase = async (userId) => {
     try {
-      // Try loading from Supabase first
-      const { data: rows, error } = await supabase
-        .from("user_data")
-        .select("data")
-        .eq("user_id", userId);
-
-      if (error) {
-        console.error("Supabase load error:", error);
-      }
-
+      const { data: rows, error } = await supabase.from("user_data").select("data").eq("user_id", userId);
+      if (error) console.error("Supabase load error:", error);
       if (rows && rows.length > 0 && rows[0].data) {
         const merged = { ...defaultData, ...rows[0].data };
         setData(merged);
@@ -354,19 +366,14 @@ export default function Joie() {
         setLoaded(true);
         return;
       }
-
-      // No cloud data — check localStorage for existing data to migrate
       const local = localStorage.getItem("joie-data");
       if (local) {
         const parsed = { ...defaultData, ...JSON.parse(local) };
         setData(parsed);
-        await supabase.from("user_data")
-          .update({ data: parsed, updated_at: new Date().toISOString() })
-          .eq("user_id", userId);
+        await supabase.from("user_data").update({ data: parsed, updated_at: new Date().toISOString() }).eq("user_id", userId);
       }
     } catch (e) {
       console.error("Load error:", e);
-      // Final fallback — try localStorage
       try {
         const local = localStorage.getItem("joie-data");
         if (local) setData({ ...defaultData, ...JSON.parse(local) });
@@ -380,19 +387,10 @@ export default function Joie() {
     try { localStorage.setItem("joie-data", JSON.stringify(newData)); } catch {}
     if (user) {
       try {
-        // Try update first (row should exist)
-        const { error: updateError } = await supabase
-          .from("user_data")
-          .update({ data: newData, updated_at: new Date().toISOString() })
-          .eq("user_id", user.id);
-
+        const { error: updateError } = await supabase.from("user_data").update({ data: newData, updated_at: new Date().toISOString() }).eq("user_id", user.id);
         if (updateError) {
           console.error("Update failed, trying insert:", updateError);
-          // Fallback to insert if row doesn't exist yet
-          const { error: insertError } = await supabase
-            .from("user_data")
-            .insert({ user_id: user.id, data: newData, updated_at: new Date().toISOString() });
-
+          const { error: insertError } = await supabase.from("user_data").insert({ user_id: user.id, data: newData, updated_at: new Date().toISOString() });
           if (insertError) console.error("Insert also failed:", insertError);
         }
       } catch (e) { console.error("Supabase save exception:", e); }
@@ -404,19 +402,14 @@ export default function Joie() {
     setAuthError(null);
     try {
       let result;
-      if (mode === "signup") {
-        result = await supabase.auth.signUp({ email: authEmail, password: authPassword });
-      } else {
-        result = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
-      }
+      if (mode === "signup") result = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+      else result = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
       if (result.error) setAuthError(result.error.message);
       else if (mode === "signup" && result.data?.user && !result.data.session) {
         setAuthError("Check your email to confirm your account, then log in.");
         setAuthMode("login");
       }
-    } catch (e) {
-      setAuthError(e.message);
-    }
+    } catch (e) { setAuthError(e.message); }
     setAuthLoading(false);
   };
 
@@ -424,7 +417,7 @@ export default function Joie() {
     await supabase.auth.signOut();
     setUser(null);
     setData(defaultData);
-    setView("dashboard");
+    setView("home");
   };
 
   const showToast = (msg) => {
@@ -455,7 +448,7 @@ export default function Joie() {
     persist({ ...data, hobbies: [...data.hobbies, newHobby] });
     setHobbyForm({ name: "", icon: "🎸", weeklyGoal: "", category: "move", hobbyType: "routine" });
     showToast(`${newHobby.icon} ${newHobby.name} added!`);
-    setView("dashboard");
+    setView("hobbies");
   };
 
   const updateHobby = () => {
@@ -467,7 +460,7 @@ export default function Joie() {
     setEditingHobby(null);
     setHobbyForm({ name: "", icon: "🎸", weeklyGoal: "", category: "move", hobbyType: "routine" });
     showToast("Hobby updated!");
-    setView("dashboard");
+    setView("hobbies");
   };
 
   const deleteHobby = (id) => {
@@ -475,7 +468,7 @@ export default function Joie() {
     persist({ ...data, hobbies: data.hobbies.filter(h => h.id !== id) });
     setEditingHobby(null);
     showToast(`${hobby?.name} removed`);
-    setView("dashboard");
+    setView("hobbies");
   };
 
   const toggleDay = (hobbyId, date) => {
@@ -512,28 +505,38 @@ export default function Joie() {
       return;
     }
 
-    if (date === today) {
-      setCheckinId(hobbyId);
-      setCheckinMinutes("30");
-    } else {
-      setHeatEdit({ hobbyId, date });
-      setHeatMinutes("30");
-    }
+    setHeatEdit({ hobbyId, date });
+    setHeatMinutes("30");
   };
 
   const confirmHeatEdit = () => {
     if (!heatEdit) return;
     const mins = parseInt(heatMinutes) || 0;
     if (mins <= 0) { showToast("Log at least 1 minute!"); return; }
-    const xpEarned = 10 + Math.floor(mins / 30) * 5;
+    const hobby = data.hobbies.find(h => h.id === heatEdit.hobbyId);
+    const catMult = getTotalMultiplier(data.hobbies, hobby?.category || "move");
+    const baseXP = 10 + Math.floor(mins / 30) * 5;
+    const xpEarned = Math.floor(baseXP * catMult);
     const updated = data.hobbies.map(h => {
       if (h.id !== heatEdit.hobbyId) return h;
       const log = { ...h.log };
       log[heatEdit.date] = mins;
       return { ...h, log };
     });
+
+    let bonusMsg = "";
+    if (hobby && hobby.weeklyGoal && heatEdit.date === today) {
+      const beforeMins = getWeeklyMinutes(hobby.log);
+      const afterMins = beforeMins + mins;
+      if (beforeMins < hobby.weeklyGoal && afterMins >= hobby.weeklyGoal) {
+        bonusMsg = ` 🎯 +${WEEKLY_GOAL_BONUS} bonus!`;
+      }
+    }
+    const multMsg = catMult > 1 ? ` (${catMult}x)` : "";
+
     persist({ ...data, hobbies: updated });
-    showToast(`+${xpEarned} XP · Logged ${mins}min retroactively`);
+    const msg = ENCOURAGEMENTS[Math.floor(Math.random() * ENCOURAGEMENTS.length)];
+    showToast(`+${xpEarned} XP${multMsg}${bonusMsg} · ${msg}`);
     setHeatEdit(null);
   };
 
@@ -601,7 +604,6 @@ export default function Joie() {
   const fetchDiscover = async () => {
     const interests = data.interests || [];
     if (interests.length === 0) return;
-
     if (feedDate === today && feedCards.length > 0) return;
 
     setFeedLoading(true);
@@ -625,31 +627,22 @@ Return ONLY a JSON array, no other text:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt }),
         });
-
         if (!response.ok) {
           if (response.status === 503 && attempt < maxRetries) {
-            console.log(`Attempt ${attempt} got 503, retrying...`);
             await new Promise(r => setTimeout(r, 2000 * attempt));
             continue;
           }
           const errText = await response.text();
           throw new Error(`API returned ${response.status}: ${errText.slice(0, 200)}`);
         }
-
         const result = await response.json();
-
         if (result.error) throw new Error(result.error);
-
         const text = result.text || "";
         const cleaned = text.replace(/```json|```/g, "").trim();
         const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-
         if (!jsonMatch) throw new Error("No JSON array found in response");
-
         const cards = JSON.parse(jsonMatch[0]);
-
         if (!Array.isArray(cards) || cards.length === 0) throw new Error("Empty result");
-
         setFeedCards(cards.slice(0, DAILY_CARD_LIMIT));
         setFeedIndex(0);
         setFeedDate(today);
@@ -662,7 +655,6 @@ Return ONLY a JSON array, no other text:
           setFeedError(err.message);
           showToast("Couldn't load content — try again later");
         } else {
-          console.log(`Attempt ${attempt} failed, retrying...`);
           await new Promise(r => setTimeout(r, 2000 * attempt));
         }
       }
@@ -673,9 +665,10 @@ Return ONLY a JSON array, no other text:
   const todayCheckedCount = data.hobbies.filter(h => h.log[today]).length;
   const todayTotal = data.hobbies.length;
   const overallStreak = calculateOverallStreak(data.hobbies, data.restDays);
+  const bestStreak = longestOverallStreak(data.hobbies, data.restDays);
   const isRestDay = data.restDays && data.restDays[today];
   const restDaysUsedThisWeek = getRestDaysThisWeek(data.restDays);
-  const stageInfo = getStageInfo(data.hobbies);
+  const stageInfo = getStageInfo(data.hobbies, bestStreak);
   const diversityMult = getDiversityMultiplier(data.hobbies);
 
   const toggleRestDay = (date) => {
@@ -700,7 +693,6 @@ Return ONLY a JSON array, no other text:
 
   if (!loaded) return <div style={styles.loadWrap}><div style={styles.loadPulse}>🌱</div></div>;
 
-  // Auth screen
   if (!user) return (
     <div style={styles.app}>
       <style>{`
@@ -710,46 +702,15 @@ Return ONLY a JSON array, no other text:
       <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", padding: 20 }}>
         <h1 style={{ fontFamily: "'DM Serif Display', serif", fontSize: 42, color: accent, marginBottom: 8 }}>Joie</h1>
         <p style={{ color: textDim, fontSize: 15, marginBottom: 40 }}>Find joy in life outside of work</p>
-
         <div style={{ width: "100%", maxWidth: 360 }}>
           <div style={{ display: "flex", marginBottom: 20, borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
-            <button
-              onClick={() => { setAuthMode("login"); setAuthError(null); }}
-              style={{ flex: 1, padding: "10px", background: authMode === "login" ? accentDim : "transparent", color: authMode === "login" ? accent : textDim, border: "none", cursor: "pointer", fontFamily: "'Source Sans 3', sans-serif", fontSize: 14, fontWeight: 500 }}
-            >Log in</button>
-            <button
-              onClick={() => { setAuthMode("signup"); setAuthError(null); }}
-              style={{ flex: 1, padding: "10px", background: authMode === "signup" ? accentDim : "transparent", color: authMode === "signup" ? accent : textDim, border: "none", cursor: "pointer", fontFamily: "'Source Sans 3', sans-serif", fontSize: 14, fontWeight: 500 }}
-            >Sign up</button>
+            <button onClick={() => { setAuthMode("login"); setAuthError(null); }} style={{ flex: 1, padding: "10px", background: authMode === "login" ? accentDim : "transparent", color: authMode === "login" ? accent : textDim, border: "none", cursor: "pointer", fontFamily: "'Source Sans 3', sans-serif", fontSize: 14, fontWeight: 500 }}>Log in</button>
+            <button onClick={() => { setAuthMode("signup"); setAuthError(null); }} style={{ flex: 1, padding: "10px", background: authMode === "signup" ? accentDim : "transparent", color: authMode === "signup" ? accent : textDim, border: "none", cursor: "pointer", fontFamily: "'Source Sans 3', sans-serif", fontSize: 14, fontWeight: 500 }}>Sign up</button>
           </div>
-
-          <input
-            type="email"
-            placeholder="Email"
-            value={authEmail}
-            onChange={e => setAuthEmail(e.target.value)}
-            style={{ ...styles.input, width: "100%", marginBottom: 12 }}
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={authPassword}
-            onChange={e => setAuthPassword(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && handleAuth(authMode)}
-            style={{ ...styles.input, width: "100%", marginBottom: 20 }}
-          />
-
-          {authError && (
-            <p style={{ color: accent, fontSize: 13, marginBottom: 16, textAlign: "center" }}>{authError}</p>
-          )}
-
-          <button
-            onClick={() => handleAuth(authMode)}
-            disabled={authLoading}
-            style={{ ...styles.primaryBtn, width: "100%", opacity: authLoading ? 0.6 : 1 }}
-          >
-            {authLoading ? "..." : authMode === "login" ? "Log in" : "Create account"}
-          </button>
+          <input type="email" placeholder="Email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} style={{ ...styles.input, width: "100%", marginBottom: 12 }} />
+          <input type="password" placeholder="Password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAuth(authMode)} style={{ ...styles.input, width: "100%", marginBottom: 20 }} />
+          {authError && <p style={{ color: accent, fontSize: 13, marginBottom: 16, textAlign: "center" }}>{authError}</p>}
+          <button onClick={() => handleAuth(authMode)} disabled={authLoading} style={{ ...styles.primaryBtn, width: "100%", opacity: authLoading ? 0.6 : 1 }}>{authLoading ? "..." : authMode === "login" ? "Log in" : "Create account"}</button>
         </div>
       </div>
     </div>
@@ -782,13 +743,14 @@ Return ONLY a JSON array, no other text:
       {/* Nav */}
       <nav style={styles.nav}>
         {[
-          { key: "dashboard", label: "Dashboard", icon: "◉" },
-          { key: "discover", label: "Discover", icon: "✦" },
+          { key: "home", label: "Home", icon: "◉" },
+          { key: "hobbies", label: "Hobbies", icon: "◈" },
+          { key: "discover", label: "Discover", icon: "✧" },
         ].map(tab => (
           <button
             key={tab.key}
             onClick={() => setView(tab.key)}
-            style={{ ...styles.navBtn, ...((view === tab.key || (tab.key === "dashboard" && view === "add")) ? styles.navBtnActive : {}) }}
+            style={{ ...styles.navBtn, ...((view === tab.key || (tab.key === "hobbies" && view === "add")) ? styles.navBtnActive : {}) }}
           >
             <span style={styles.navIcon}>{tab.icon}</span>
             {tab.label}
@@ -798,8 +760,8 @@ Return ONLY a JSON array, no other text:
 
       {/* Content */}
       <main style={styles.main}>
-        {/* ===== DASHBOARD ===== */}
-        {view === "dashboard" && (
+        {/* ===== HOME ===== */}
+        {view === "home" && (
           <div style={styles.fadeIn}>
             {data.hobbies.length === 0 ? (
               <div style={styles.empty}>
@@ -833,9 +795,37 @@ Return ONLY a JSON array, no other text:
                           <span style={{ fontSize: 10, color: tertiary, background: "rgba(103,232,249,0.08)", padding: "2px 7px", borderRadius: 5, fontWeight: 600 }}>+{((diversityMult - 1) * 100).toFixed(0)}% diversity</span>
                         )}
                       </div>
-                      <div style={{ fontSize: 12, color: textDim }}>
-                        {stageInfo.next ? `Next: ${stageInfo.next.desc}` : "Journey complete — you are the Wayfarer"}
-                      </div>
+                      {stageInfo.next && stageInfo.next.req && (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                          {(() => {
+                            const req = stageInfo.next.req;
+                            const qualifying = stageInfo.catLevels.filter(c => c.level >= req.level).length;
+                            const catMet = qualifying >= req.count;
+                            const streakMet = bestStreak >= (req.streak || 0);
+                            return (
+                              <>
+                                <span style={{
+                                  fontSize: 10, padding: "3px 10px", borderRadius: 20, fontWeight: 500,
+                                  background: catMet ? "rgba(52,211,153,0.12)" : "rgba(255,255,255,0.04)",
+                                  color: catMet ? "#34D399" : textDim,
+                                  border: catMet ? "1px solid rgba(52,211,153,0.25)" : "1px solid rgba(255,255,255,0.08)",
+                                }}>{catMet ? "✓" : "○"} {req.count} cats at Lv.{req.level} ({qualifying}/{req.count})</span>
+                                {req.streak > 0 && (
+                                  <span style={{
+                                    fontSize: 10, padding: "3px 10px", borderRadius: 20, fontWeight: 500,
+                                    background: streakMet ? "rgba(52,211,153,0.12)" : "rgba(255,255,255,0.04)",
+                                    color: streakMet ? "#34D399" : textDim,
+                                    border: streakMet ? "1px solid rgba(52,211,153,0.25)" : "1px solid rgba(255,255,255,0.08)",
+                                  }}>{streakMet ? "✓" : "○"} {req.streak}d streak ({Math.min(bestStreak, req.streak)}/{req.streak})</span>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
+                      {!stageInfo.next && (
+                        <div style={{ fontSize: 12, color: textDim, marginTop: 4 }}>Journey complete — you are the Wayfarer</div>
+                      )}
                     </div>
                   </div>
 
@@ -863,30 +853,30 @@ Return ONLY a JSON array, no other text:
                       );
                     })}
                   </div>
-
-                  {/* Mini stats */}
-                  <div className="mini-stats" style={{ display: "flex", gap: 16, justifyContent: "center", paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                    <div style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: 20, fontWeight: 600, color: accent, fontFamily: "'DM Serif Display', serif" }}>{overallStreak}</div>
-                      <div style={{ fontSize: 10, color: textDim, textTransform: "uppercase", letterSpacing: 1 }}>streak</div>
-                    </div>
-                    <div style={{ width: 1, background: "rgba(255,255,255,0.06)" }}></div>
-                    <div style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: 20, fontWeight: 600, color: secondary, fontFamily: "'DM Serif Display', serif" }}>{data.hobbies.reduce((a, h) => a + totalDays(h.log), 0)}</div>
-                      <div style={{ fontSize: 10, color: textDim, textTransform: "uppercase", letterSpacing: 1 }}>check-ins</div>
-                    </div>
-                    <div style={{ width: 1, background: "rgba(255,255,255,0.06)" }}></div>
-                    <div style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: 20, fontWeight: 600, color: "#34D399", fontFamily: "'DM Serif Display', serif" }}>{restDaysUsedThisWeek}/2</div>
-                      <div style={{ fontSize: 10, color: textDim, textTransform: "uppercase", letterSpacing: 1 }}>rest days</div>
-                    </div>
-                  </div>
                 </div>
 
-                {/* Today's check-ins */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                  <h2 style={{ ...styles.sectionTitle, marginBottom: 0 }}>Today's Check-in</h2>
-                  <button style={styles.smallBtn} onClick={() => { setEditingHobby(null); setHobbyForm({ name: "", icon: "🎸", weeklyGoal: "", category: "move", hobbyType: "routine" }); setView("add"); }}>+ Add hobby</button>
+                {/* Weekly Stats */}
+                <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
+                  <div style={{ flex: 1, background: card, borderRadius: 14, padding: "16px 12px", border: "1px solid rgba(255,255,255,0.04)", textAlign: "center" }}>
+                    <div style={{ fontSize: 24, fontWeight: 600, color: accent, fontFamily: "'DM Serif Display', serif" }}>
+                      {data.hobbies.reduce((sum, h) => sum + getWeeklyMinutes(h.log), 0)}
+                    </div>
+                    <div style={{ fontSize: 10, color: textDim, textTransform: "uppercase", letterSpacing: 1 }}>min this week</div>
+                  </div>
+                  <div style={{ flex: 1, background: card, borderRadius: 14, padding: "16px 12px", border: "1px solid rgba(255,255,255,0.04)", textAlign: "center" }}>
+                    <div style={{ fontSize: 24, fontWeight: 600, color: secondary, fontFamily: "'DM Serif Display', serif" }}>{overallStreak}</div>
+                    <div style={{ fontSize: 10, color: textDim, textTransform: "uppercase", letterSpacing: 1 }}>day streak</div>
+                  </div>
+                  <div style={{ flex: 1, background: card, borderRadius: 14, padding: "16px 12px", border: "1px solid rgba(255,255,255,0.04)", textAlign: "center" }}>
+                    <div style={{ fontSize: 24, fontWeight: 600, color: secondary, fontFamily: "'DM Serif Display', serif" }}>{bestStreak}</div>
+                    <div style={{ fontSize: 10, color: textDim, textTransform: "uppercase", letterSpacing: 1 }}>best streak</div>
+                  </div>
+                  <div style={{ flex: 1, background: card, borderRadius: 14, padding: "16px 12px", border: "1px solid rgba(255,255,255,0.04)", textAlign: "center" }}>
+                    <div style={{ fontSize: 24, fontWeight: 600, color: "#34D399", fontFamily: "'DM Serif Display', serif" }}>
+                      {data.hobbies.filter(h => h.weeklyGoal && getWeeklyMinutes(h.log) >= h.weeklyGoal).length}/{data.hobbies.filter(h => h.weeklyGoal).length}
+                    </div>
+                    <div style={{ fontSize: 10, color: textDim, textTransform: "uppercase", letterSpacing: 1 }}>goals hit</div>
+                  </div>
                 </div>
 
                 {/* Rest day button */}
@@ -894,12 +884,12 @@ Return ONLY a JSON array, no other text:
                   onClick={() => toggleRestDay()}
                   style={{
                     width: "100%",
-                    marginBottom: 14,
+                    marginBottom: 20,
                     padding: "14px 16px",
                     borderRadius: 12,
                     border: isRestDay ? "1px solid rgba(52,211,153,0.3)" : "1px solid rgba(52,211,153,0.15)",
                     background: isRestDay ? "rgba(52,211,153,0.08)" : "rgba(52,211,153,0.03)",
-                    color: isRestDay ? "#34D399" : "#34D399",
+                    color: "#34D399",
                     fontSize: 14,
                     fontWeight: 500,
                     cursor: "pointer",
@@ -916,105 +906,8 @@ Return ONLY a JSON array, no other text:
                   {isRestDay ? "Resting today — streak protected" : "Take a rest day"}
                 </button>
 
-                <div className="checkin-grid" style={styles.checkinGrid}>
-                  {data.hobbies.map(h => {
-                    const done = h.log[today];
-                    const cat = CATEGORIES.find(c => c.id === h.category) || CATEGORIES[0];
-                    const weekMins = getWeeklyMinutes(h.log);
-                    const isCheckinOpen = checkinId === h.id;
-                    const hobbyXP = getHobbyXP(h.log, h.weeklyGoal, getTotalMultiplier(data.hobbies, h.category || "move"), h.hobbyType);
-                    const hobbyLevel = getLevelInfo(hobbyXP);
-
-                    if (isCheckinOpen) {
-                      return (
-                        <div key={h.id} style={{ ...styles.checkinCard, ...styles.checkinDone, gap: 10 }}>
-                          <span style={{ fontSize: 28 }}>{h.icon}</span>
-                          <span style={styles.checkinName}>{h.name}</span>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
-                            <input
-                              type="number"
-                              value={checkinMinutes}
-                              onChange={e => setCheckinMinutes(e.target.value)}
-                              style={{ ...styles.input, width: 64, padding: "8px 10px", textAlign: "center", fontSize: 16 }}
-                              min="1"
-                              max="480"
-                              autoFocus
-                            />
-                            <span style={{ fontSize: 12, color: textDim }}>min</span>
-                          </div>
-                          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                            <button onClick={confirmCheckin} style={{ ...styles.primaryBtn, padding: "6px 16px", fontSize: 13 }}>Log</button>
-                            <button onClick={() => setCheckinId(null)} style={{ ...styles.secondaryBtn, padding: "6px 12px", fontSize: 13 }}>✕</button>
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div
-                        key={h.id}
-                        onClick={() => toggleDay(h.id, today)}
-                        style={{
-                          ...styles.checkinCard,
-                          ...(done ? styles.checkinDone : {}),
-                          ...(h.hobbyType === "event" && !done ? { background: "rgba(250,204,21,0.04)", borderColor: "rgba(250,204,21,0.12)" } : {}),
-                          ...(h.hobbyType === "event" && done ? { background: "rgba(250,204,21,0.10)", borderColor: "rgba(250,204,21,0.25)" } : {}),
-                          position: "relative", cursor: "pointer",
-                        }}
-                      >
-                        <div style={{ position: "absolute", top: 8, left: 8, display: "flex", gap: 4, alignItems: "center" }}>
-                          <span style={{ fontSize: 10, color: secondary, padding: "2px 6px", borderRadius: 6, background: "rgba(192,132,252,0.1)", fontWeight: 600 }}>Lv.{hobbyLevel.level} · {hobbyXP} XP</span>
-                          {h.hobbyType === "event" && (
-                            <span style={{ fontSize: 9, color: "#FACC15", background: "rgba(250,204,21,0.12)", padding: "2px 6px", borderRadius: 5, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>Event</span>
-                          )}
-                        </div>
-                        <span
-                          onClick={e => { e.stopPropagation(); startEdit(h); }}
-                          style={{ position: "absolute", top: 8, right: 8, fontSize: 13, color: textDim, cursor: "pointer", padding: "4px 6px", borderRadius: 6, background: "rgba(255,255,255,0.06)" }}
-                          title="Edit hobby"
-                        >✎</span>
-                        <span style={{ fontSize: 28, marginTop: 8 }}>{h.icon}</span>
-                        <span style={styles.checkinName}>{h.name}</span>
-                        <span style={{ fontSize: 10, color: cat.color, textTransform: "uppercase", letterSpacing: 1, opacity: 0.8 }}>{cat.label}</span>
-                        <span style={{ ...styles.checkinCheck, ...(done ? styles.checkinCheckDone : {}) }}>
-                          {done ? "✓" : "○"}
-                        </span>
-                        {h.hobbyType === "event" ? (
-                          <span style={{ fontSize: 11, color: textDim }}>{done ? "Logged" : `${totalDays(h.log)} events total`}</span>
-                        ) : (
-                          <>
-                            {done && <span style={{ fontSize: 11, color: textDim }}>{typeof done === "number" ? done : 30}min today</span>}
-                            {h.weeklyGoal ? (
-                              <div style={{ width: "100%", marginTop: 4 }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: textDim, marginBottom: 3 }}>
-                                  <span>{weekMins}min</span>
-                                  <span>{h.weeklyGoal}min/wk</span>
-                                </div>
-                                <div style={{ width: "100%", height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
-                                  <div style={{ width: `${Math.min((weekMins / h.weeklyGoal) * 100, 100)}%`, height: "100%", background: weekMins >= h.weeklyGoal ? "#34D399" : accent, borderRadius: 2, transition: "width 0.3s ease" }}></div>
-                                </div>
-                              </div>
-                            ) : (
-                              <span style={{ fontSize: 11, color: textDim }}>{weekMins > 0 ? `${weekMins}min this week` : ""}</span>
-                            )}
-                          </>
-                        )}
-                        {/* Hobby XP progress */}
-                        <div style={{ width: "100%", marginTop: 6 }}>
-                          <div style={{ width: "100%", height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
-                            <div style={{ width: `${hobbyLevel.progress * 100}%`, height: "100%", background: secondary, borderRadius: 2, transition: "width 0.3s ease" }}></div>
-                          </div>
-                          <div style={{ fontSize: 9, color: textDim, marginTop: 3, textAlign: "center" }}>
-                            {hobbyLevel.nextName ? `${hobbyLevel.nextXp - hobbyXP} XP to ${hobbyLevel.nextName}` : "Max level!"}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
                 {/* Week overview */}
-                <h2 style={{ ...styles.sectionTitle, marginTop: 32 }}>This Week</h2>
+                <h2 style={styles.sectionTitle}>This Week</h2>
                 <div className="hgrid" style={styles.heatWrap}>
                   {/* Rest day row */}
                   <div style={styles.heatRow}>
@@ -1097,6 +990,75 @@ Return ONLY a JSON array, no other text:
                   })}
                 </div>
               </>
+            )}
+          </div>
+        )}
+
+        {/* ===== HOBBIES ===== */}
+        {view === "hobbies" && (
+          <div style={styles.fadeIn}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h2 style={{ ...styles.sectionTitle, marginBottom: 0 }}>Your Hobbies</h2>
+              <button style={styles.smallBtn} onClick={() => { setEditingHobby(null); setHobbyForm({ name: "", icon: "🎸", weeklyGoal: "", category: "move", hobbyType: "routine" }); setView("add"); }}>+ Add</button>
+            </div>
+            {data.hobbies.length === 0 ? (
+              <div style={styles.empty}>
+                <div style={{ fontSize: 48, marginBottom: 16 }}>🌱</div>
+                <h2 style={styles.emptyTitle}>No hobbies yet</h2>
+                <p style={styles.emptyText}>Add your first hobby to start tracking.</p>
+                <button style={styles.primaryBtn} onClick={() => setView("add")}>+ Add First Hobby</button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {data.hobbies.map(h => {
+                  const cat = CATEGORIES.find(c => c.id === h.category) || CATEGORIES[0];
+                  const hobbyXP = getHobbyXP(h.log, h.weeklyGoal, getTotalMultiplier(data.hobbies, h.category || "move"), h.hobbyType);
+                  const hobbyLevel = getLevelInfo(hobbyXP);
+                  const weekMins = getWeeklyMinutes(h.log);
+                  return (
+                    <div key={h.id} style={{
+                      background: h.hobbyType === "event" ? "rgba(250,204,21,0.04)" : card,
+                      border: h.hobbyType === "event" ? "1px solid rgba(250,204,21,0.12)" : "1px solid rgba(255,255,255,0.06)",
+                      borderRadius: 14, padding: "16px 20px",
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                          <span style={{ fontSize: 28 }}>{h.icon}</span>
+                          <div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <span style={{ fontSize: 15, fontWeight: 600, color: text }}>{h.name}</span>
+                              <span style={{ fontSize: 10, color: cat.color, background: cat.color + "18", padding: "2px 8px", borderRadius: 6, textTransform: "uppercase", letterSpacing: 1 }}>{cat.label}</span>
+                              {h.hobbyType === "event" && (
+                                <span style={{ fontSize: 9, color: "#FACC15", background: "rgba(250,204,21,0.12)", padding: "2px 6px", borderRadius: 5, fontWeight: 600, textTransform: "uppercase" }}>Event</span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 12, color: textDim, marginTop: 4 }}>
+                              Lv.{hobbyLevel.level} · {hobbyXP} XP · {calculateStreak(h.log)}d streak · {totalDays(h.log)} total
+                            </div>
+                            {h.weeklyGoal && (
+                              <div style={{ fontSize: 12, color: weekMins >= h.weeklyGoal ? "#34D399" : textDim, marginTop: 2 }}>
+                                {weekMins}/{h.weeklyGoal} min this week {weekMins >= h.weeklyGoal ? "✓" : ""}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button style={styles.iconBtn} onClick={() => startEdit(h)} title="Edit">✎</button>
+                        </div>
+                      </div>
+                      {/* XP progress bar */}
+                      <div style={{ marginTop: 10, width: "100%" }}>
+                        <div style={{ width: "100%", height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
+                          <div style={{ width: `${hobbyLevel.progress * 100}%`, height: "100%", background: secondary, borderRadius: 2, transition: "width 0.3s ease" }}></div>
+                        </div>
+                        <div style={{ fontSize: 10, color: textDim, marginTop: 3 }}>
+                          {hobbyLevel.nextName ? `${hobbyLevel.nextXp - hobbyXP} XP to ${hobbyLevel.nextName}` : "Max level!"}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         )}
@@ -1204,7 +1166,7 @@ Return ONLY a JSON array, no other text:
                 <button style={styles.primaryBtn} onClick={editingHobby ? updateHobby : addHobby}>
                   {editingHobby ? "Save Changes" : "Add Hobby"}
                 </button>
-                <button style={styles.secondaryBtn} onClick={() => { setEditingHobby(null); setHobbyForm({ name: "", icon: "🎸", weeklyGoal: "", category: "move", hobbyType: "routine" }); setView("dashboard"); }}>
+                <button style={styles.secondaryBtn} onClick={() => { setEditingHobby(null); setHobbyForm({ name: "", icon: "🎸", weeklyGoal: "", category: "move", hobbyType: "routine" }); setView("hobbies"); }}>
                   Cancel
                 </button>
               </div>
